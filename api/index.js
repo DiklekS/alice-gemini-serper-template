@@ -120,7 +120,7 @@ function buildSearchQuery(text, history) {
       .map(part => part.replace(/^вот что происходит в омске\.?\s*/i, "").trim())
       .find(part => part.length > 20 && (!isDroneTopic || /беспилот|бпла|дрон|сирен|атак/i.test(part)));
     const topic = isDroneTopic ? "беспилотная опасность атака БПЛА" : query;
-    return [city, topic, relevantHeadline, "последние новости Омск подробности после:2026-11-03 -карта -мониторинг -Петербург"]
+    return [city, topic, relevantHeadline, "последние новости Омск подробности after:2026-11-03 -карта -мониторинг -Петербург"]
       .filter(Boolean).join(" ");
   }
 
@@ -134,7 +134,7 @@ function buildSearchQuery(text, history) {
   }
 
   if (/что происходит|что случилось|что произошло/i.test(query)) {
-    return query + " последние новости конкретные события сегодня";
+    return query + " последние новости конкретные события сегодня after:2026-11-03";
   }
   return query;
 }
@@ -256,15 +256,19 @@ function isRecentNewsItem(item) {
   const now = new Date();
   let published = null;
 
-  const relative = source.match(/\\b(\\d+)\\s*(час|часа|часов|минут|минута|минуты|дн|день|дня|дней)\\s*назад\\b|\\b(вчера|сегодня)\\b/);
+  const relative = source.match(/\b(\d+)\s*(час|часа|часов|минут|минута|минуты|дн|день|дня|дней)\s*назад\b|\b(вчера|сегодня)\b|\b(\d+)\s*(hours?|minutes?|days?)\s+ago\b|\b(today|yesterday)\b/);
   if (relative) {
     if (relative[2]) {
       const amount = Number(relative[1]);
       const unit = relative[2];
       published = new Date(now.getTime() - amount * (/час/.test(unit) ? 3600000 : /минут/.test(unit) ? 60000 : 86400000));
+    } else if (relative[4]) {
+      const amount = Number(relative[4]);
+      const unit = relative[5];
+      published = new Date(now.getTime() - amount * (/hour/.test(unit) ? 3600000 : /minute/.test(unit) ? 60000 : 86400000));
     } else {
       published = new Date(now);
-      if (relative[3] === "вчера") published.setDate(published.getDate() - 1);
+      if (relative[3] === "вчера" || relative[6] === "yesterday") published.setDate(published.getDate() - 1);
     }
   }
 
@@ -274,7 +278,7 @@ function isRecentNewsItem(item) {
       "мая": 4, "июня": 5, "июля": 6, "августа": 7,
       "сентября": 8, "октября": 9, "ноября": 10, "декабря": 11
     };
-    const dated = source.match(/\\b(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\\s+(20\\d{2}))?\\b/);
+    const dated = source.match(/\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(20\d{2}))?\b/);
     if (dated) {
       const year = dated[3] ? Number(dated[3]) : now.getFullYear();
       published = new Date(year, monthNames[dated[2]], Number(dated[1]), 12, 0, 0);
@@ -286,8 +290,6 @@ function isRecentNewsItem(item) {
     if (Number.isFinite(parsed)) published = new Date(parsed);
   }
 
-  // If the search provider supplies no verifiable publication date, do not
-  // present the result as a current event in a voice news follow-up.
   if (!published || Number.isNaN(published.getTime())) return false;
   const ageMs = now.getTime() - published.getTime();
   return ageMs >= -86400000 && ageMs <= 7 * 86400000;
@@ -300,7 +302,7 @@ function isRelevantDetailedResult(item) {
 
   if (!isRecentNewsItem(item)) return false;
   if (!/(омск|омской|омске|омич)/i.test(combined)) return false;
-  if (/(карта\\s*бпла|мониторинг воздушной|воздушной обстановк|активных:\\s*\\d+|все регионы)/i.test(combined)) return false;
+  if (/(карта\s*бпла|мониторинг воздушной|воздушной обстановк|активных:\s*\d+|все регионы)/i.test(combined)) return false;
   if (/(санкт-петербург|петербург|ленинградск)/i.test(combined)) return false;
   if (!/(беспилот|бпла|дрон|сирен|пво|авиационн|ограничени.*связ|атак)/i.test(combined)) return false;
   return true;
@@ -323,8 +325,9 @@ function usefulSnippetLead(value) {
 function makeSearchAnswer(result, detailed = false) {
   const seen = new Set();
   const raw = Array.isArray(result.snippets) ? result.snippets : [];
-  console.info("Serper organic results:", JSON.stringify(raw.slice(0, 6).map(item => ({
+  console.info("Serper organic results:", JSON.stringify(raw.slice(0, 8).map(item => ({
     title: item.title,
+    date: item.date,
     snippet: String(item.snippet || "").slice(0, 220)
   }))));
 
@@ -377,12 +380,24 @@ function makeSearchAnswer(result, detailed = false) {
   };
 
   for (const item of raw) {
-    const title = cleanNewsTitle(item.title);
-    if (isUsefulNewsTitle(title)) addHeadline(title);
+    // Require a verifiable recent date in the general city digest as well.
+    if (!isRecentNewsItem(item)) continue;
+    const rawTitle = String(item.title || "");
+    if (/\.{2,}|…/.test(rawTitle)) continue;
+    const title = cleanNewsTitle(rawTitle);
+    const titleLower = title.toLowerCase().replace(/ё/g, "е");
+    if (/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(titleLower) &&
+        !/(омск|омской|омске)/i.test(titleLower)) continue;
+    if (isUsefulNewsTitle(title) && /(омск|омской|омске|омич)/i.test(titleLower)) addHeadline(title);
 
     const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
     const fragments = snippet.split(/\s*[·•]\s*/).filter(Boolean);
-    for (const fragment of fragments) addHeadline(fragment);
+    for (const fragment of fragments) {
+      const fragmentText = fragment.toLowerCase().replace(/ё/g, "е");
+      if (!/(омск|омской|омске|омич|аэропорт|сирен|беспилот|бпла|дрон|хоценко)/i.test(fragmentText)) continue;
+      if (/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(fragmentText)) continue;
+      addHeadline(fragment);
+    }
     if (fragments.length <= 1 && !isUsefulNewsTitle(title)) {
       addHeadline(usefulSnippetLead(snippet));
     }
