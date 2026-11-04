@@ -223,6 +223,8 @@ function cleanNewsTitle(value) {
 function isUsefulNewsTitle(title) {
   const value = String(title || "").trim();
   if (value.length < 8 || value.length > 220) return false;
+  // Search sometimes returns social-channel names as if they were news headlines.
+  if (/@[a-z0-9_]{2,}|telegram|телеграм|путеводитель.*для местных/i.test(value)) return false;
 
   const genericPatterns = [
     /^новости\b/i,
@@ -324,7 +326,23 @@ function usefulSnippetLead(value) {
   return candidate.slice(0, 190).replace(/[.!?;:,]+$/g, "").trim();
 }
 
-function makeSearchAnswer(result, detailed = false) {
+function mentionsOlderCalendarDate(value) {
+  const source = String(value || "").toLowerCase().replace(/ё/g, "е");
+  const months = {
+    "января": 0, "февраля": 1, "марта": 2, "апреля": 3,
+    "мая": 4, "июня": 5, "июля": 6, "августа": 7,
+    "сентября": 8, "октября": 9, "ноября": 10, "декабря": 11
+  };
+  const match = source.match(/(?:^|\\s)(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\\s+(20\\d{2}))?(?=\\s|$)/i);
+  if (!match) return false;
+  const now = new Date();
+  const year = match[3] ? Number(match[3]) : now.getFullYear();
+  const eventDay = Date.UTC(year, months[match[2]], Number(match[1]));
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return eventDay < today;
+}
+
+function makeSearchAnswer(result, detailed = false, todayOnly = false) {
   const seen = new Set();
   const raw = Array.isArray(result.snippets) ? result.snippets : [];
   console.info("Serper organic results:", JSON.stringify(raw.slice(0, 8).map(item => ({
@@ -368,6 +386,7 @@ function makeSearchAnswer(result, detailed = false) {
       .trim();
 
     if (
+      (todayOnly && mentionsOlderCalendarDate(headline)) ||
       headline.length < 18 ||
       headline.length > 170 ||
       /[.…]{2,}$/.test(String(value || "").trim()) ||
@@ -561,7 +580,7 @@ export default async function handler(req, res) {
       const query = buildSearchQuery(text, oldHistory);
       console.log("Alice search query:", query);
       const result = await searchWeb(query, searchBudget);
-      answer = makeSearchAnswer(result, detailFollowUp);
+      answer = makeSearchAnswer(result, detailFollowUp, /сегодня|today/i.test(text));
     } else {
       const geminiBudget = Math.min(
         GEMINI_TIMEOUT_MS,
