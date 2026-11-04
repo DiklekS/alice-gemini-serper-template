@@ -256,7 +256,7 @@ function isRecentNewsItem(item) {
   const now = new Date();
   let published = null;
 
-  const relative = source.match(/\b(\d+)\s*(час|часа|часов|минут|минута|минуты|дн|день|дня|дней)\s*назад\b|\b(вчера|сегодня)\b|\b(\d+)\s*(hours?|minutes?|days?)\s+ago\b|\b(today|yesterday)\b/);
+  const relative = source.match(/\b(\d+)\s*(часов|часа|час|минут|минута|минуты|дней|дня|день|дн)\s*назад\b|\b(вчера|сегодня)\b|\b(\d+)\s*(hours?|minutes?|days?)\s+ago\b|\b(today|yesterday)\b/);
   if (relative) {
     if (relative[2]) {
       const amount = Number(relative[1]);
