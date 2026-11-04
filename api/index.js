@@ -226,7 +226,9 @@ function isUsefulNewsTitle(title) {
 
   const genericPatterns = [
     /^новости\b/i,
-    /^главные новости/i,
+    /^(?:омск\s*[-—:]?\s*)?главные новости/i,
+    /^(?:чп\s*омск|омск-информ|бк\s*55|бк55)\b/i,
+    /^действия\.?$/i,
     /^последние новости/i,
     /^новости сегодня/i,
     /^смотреть онлайн/i,
@@ -386,22 +388,40 @@ function makeSearchAnswer(result, detailed = false) {
     if (/\.{2,}|…/.test(rawTitle)) continue;
     const title = cleanNewsTitle(rawTitle);
     const titleLower = title.toLowerCase().replace(/ё/g, "е");
-    if (/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(titleLower) &&
-        !/(омск|омской|омске)/i.test(titleLower)) continue;
-    if (isUsefulNewsTitle(title) && /(омск|омской|омске|омич)/i.test(titleLower)) addHeadline(title);
+    const isPortalTitle = /^(?:омск\s*[-—:]?\s*)?(?:главные|последние)?\s*новости\b|^(?:чп\s*омск|омск-информ|бк\s*55|бк55|аив|аиф)\b/i.test(title);
+    if (!isPortalTitle && isUsefulNewsTitle(title) &&
+        /(омск|омской|омске|омич)/i.test(titleLower) &&
+        !/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(titleLower)) {
+      addHeadline(title);
+    }
 
-    const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
-    const fragments = snippet.split(/\s*[·•]\s*/).filter(Boolean);
+    const snippet = String(item.snippet || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const feedParts = snippet.split(/\s*[·•]\s*/).filter(Boolean);
+    const fragments = [];
+    for (const part of feedParts) {
+      const cleanedPart = part
+        .replace(/^\s*\d{1,6}\.?\s*/, "")
+        .replace(/^(?:новости за сегодня|новости|эксклюзивы|политика|экономика|происшествия|спорт|читайте также)\s*[.!:—-]?\s*/i, "")
+        .trim();
+      if (!cleanedPart) continue;
+      const sentences = cleanedPart.split(/(?<=[.!?])\s+(?=[А-ЯЁ0-9«"„])/u);
+      for (const sentence of sentences) {
+        const fragment = sentence.replace(/^[\s\d.:-]+/, "").trim();
+        if (fragment.length >= 28) fragments.push(fragment);
+      }
+    }
+
     for (const fragment of fragments) {
       const fragmentText = fragment.toLowerCase().replace(/ё/g, "е");
       if (!/(омск|омской|омске|омич|аэропорт|сирен|беспилот|бпла|дрон|хоценко)/i.test(fragmentText)) continue;
       if (/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(fragmentText)) continue;
+      if (/^(?:новости|эксклюзивы|политика|экономика|происшествия|спорт|действия)\b/i.test(fragmentText)) continue;
       addHeadline(fragment);
     }
-    if (fragments.length <= 1 && !isUsefulNewsTitle(title)) {
-      addHeadline(usefulSnippetLead(snippet));
-    }
-    if (headlines.length >= 5) break;
+    if (headlines.length >= 6) break;
   }
 
   const answerBox = cleanNewsTitle(result.answerBox || "");
