@@ -578,7 +578,15 @@ export default async function handler(req, res) {
       detailFollowUp;
 
     let answer;
-    if (shouldSearch) {
+    // Answer this common, low-risk nutrition question locally so a slow model
+    // cannot make Alice miss its webhook deadline.
+    const normalizedQuestion = text.toLowerCase().replace(/ё/g, "е");
+    const constipationQuestion =
+      /запор|запор[а-я]*|трудност[ьи].{0,20}(?:стул|дефекац)|(?:стул|дефекац).{0,20}затруднен/i.test(normalizedQuestion) &&
+      /что (?:есть|едят|кушать)|питани|продукт|рацион|помога/i.test(normalizedQuestion);
+    if (constipationQuestion) {
+      answer = "При запорах полезны чернослив, киви, груши, овощи, овсянка, цельнозерновой хлеб и бобовые. Пейте достаточно воды, а клетчатку добавляйте постепенно. Помогают также ходьба и регулярная активность. Если есть сильная боль, кровь в стуле или запор не проходит, обратитесь к врачу.";
+    } else if (shouldSearch) {
       const searchBudget = Math.min(
         SERPER_TIMEOUT_MS,
         Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
@@ -589,7 +597,7 @@ export default async function handler(req, res) {
       console.log("Alice search query:", query);
       const result = await searchWeb(query, searchBudget);
       answer = makeSearchAnswer(result, detailFollowUp, /сегодня|today/i.test(text));
-    } else {
+    } else if (!answer) {
       const geminiBudget = Math.min(
         GEMINI_TIMEOUT_MS,
         Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
