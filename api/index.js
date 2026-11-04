@@ -333,7 +333,7 @@ function mentionsOlderCalendarDate(value) {
     "мая": 4, "июня": 5, "июля": 6, "августа": 7,
     "сентября": 8, "октября": 9, "ноября": 10, "декабря": 11
   };
-  const match = source.match(/(?:^|\\s)(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\\s+(20\\d{2}))?(?=\\s|$)/i);
+  const match = source.match(/(?:^|\s)(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(20\d{2}))?(?=\s|$)/i);
   if (!match) return false;
   const now = new Date();
   const year = match[3] ? Number(match[3]) : now.getFullYear();
@@ -452,7 +452,7 @@ function makeSearchAnswer(result, detailed = false, todayOnly = false) {
 
   if (headlines.length) {
     return fitAliceText(
-      "Вот что происходит в Омске. " + headlines.slice(0, 4).join(". Ещё событие: ") + "."
+      "Вот что происходит в Омске: " + headlines.slice(0, 4).join(". ") + "."
     );
   }
 
