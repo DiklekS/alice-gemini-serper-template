@@ -274,9 +274,7 @@ function makeSearchAnswer(result, detailed = false) {
       const key = title.toLocaleLowerCase("ru").replace(/[«»"']/g, "");
       if (seen.has(key)) continue;
       seen.add(key);
-      const description = snippet.length >= 45 && snippet.length <= 420
-        ? snippet
-        : "";
+      const description = snippet.length >= 45 && snippet.length <= 420 ? snippet : "";
       details.push(description ? title + ". " + description : title);
       if (details.length >= 3) break;
     }
@@ -288,7 +286,7 @@ function makeSearchAnswer(result, detailed = false) {
 
   const headlines = [];
   const addHeadline = value => {
-    let headline = String(value || "")
+    const headline = String(value || "")
       .replace(/https?:\/\/\S+/gi, "")
       .replace(/^\s*\d{1,2}:\d{2}\s*/, "")
       .replace(/\s+/g, " ")
@@ -329,74 +327,15 @@ function makeSearchAnswer(result, detailed = false) {
   }
 
   if (headlines.length) {
-    const selected = headlines.slice(0, 4);
     return fitAliceText(
-      "Вот что происходит в Омске. " + selected.join(". Ещё событие: ") + "."
+      "Вот что происходит в Омске. " + headlines.slice(0, 4).join(". Ещё событие: ") + "."
     );
   }
 
   return "Поиск пока не выделил отдельные новости. Попробуй спросить о конкретной теме или районе.";
 }
-  const seen = new Set();
-  const raw = Array.isArray(result.snippets) ? result.snippets : [];
-  console.info("Serper organic results:", JSON.stringify(raw.slice(0, 6).map(item => ({
-    title: item.title,
-    snippet: String(item.snippet || "").slice(0, 220)
-  }))));
 
-  const headlines = [];
-  const addHeadline = value => {
-    let headline = String(value || "")
-      .replace(/https?:\/\/\S+/gi, "")
-      .replace(/^\s*\d{1,2}:\d{2}\s*/, "")
-      .replace(/\s+/g, " ")
-      .replace(/[.…]{2,}\s*$/g, "")
-      .replace(/[.!?;:,]+$/g, "")
-      .trim();
-
-    // Search snippets from regional news homepages are often feeds:
-    // several unrelated headlines joined with " · ". Keep each one separate.
-    if (
-      headline.length < 18 ||
-      headline.length > 170 ||
-      /[.…]{2,}$/.test(String(value || "").trim()) ||
-      /\b(?:о|в|и|на|по|из|для|что|как|сообщил|сообщила)\s*$/i.test(headline) ||
-      /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline)
-    ) return;
-
-    const key = headline.toLocaleLowerCase("ru").replace(/[«»"']/g, "").trim();
-    if (seen.has(key)) return;
-    seen.add(key);
-    headlines.push(headline);
-  };
-
-  for (const item of raw) {
-    const title = cleanNewsTitle(item.title);
-    if (isUsefulNewsTitle(title)) addHeadline(title);
-
-    const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
-    const fragments = snippet.split(/\s*[·•]\s*/).filter(Boolean);
-    for (const fragment of fragments) addHeadline(fragment);
-    if (fragments.length <= 1 && !isUsefulNewsTitle(title)) {
-      addHeadline(usefulSnippetLead(snippet));
-    }
-    if (headlines.length >= 5) break;
-  }
-
-  const answerBox = cleanNewsTitle(result.answerBox || "");
-  if (!headlines.length && answerBox.length > 25 && isUsefulNewsTitle(answerBox)) {
-    addHeadline(answerBox);
-  }
-
-  if (headlines.length) {
-    const selected = headlines.slice(0, 4);
-    return fitAliceText(
-      "Вот что происходит в Омске. " + selected.join(". Ещё событие: ") + "."
-    );
-  }
-
-  return "Поиск пока не выделил отдельные новости. Попробуй спросить о конкретной теме или районе.";
-}async function askGemini(text, history, timeoutMs) {
+async function askGemini(text, history, timeoutMs) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("MISSING_GEMINI_KEY");
   if (timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
