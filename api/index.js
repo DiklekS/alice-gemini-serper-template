@@ -112,8 +112,16 @@ function buildSearchQuery(text, history) {
   // If the user names a subject after hearing the news digest, search that
   // subject directly instead of repeating the broad city-news query.
   if (isNewsDetailFollowUp(query, history)) {
-    const city = /\bомск/i.test(previous) ? "Омск" : "";
-    return [query, city, "последние новости подробности"].filter(Boolean).join(" ");
+    const isDroneTopic = /беспилот|бпла|дрон|авиационн|сирен|атаке/i.test(query);
+    const city = /\bомск/i.test(previous) || isDroneTopic ? "Омск" : "";
+    const answerContext = lastAssistantSearchAnswer(history);
+    const relevantHeadline = answerContext
+      .split(/Ещё событие:|\.\s*/)
+      .map(part => part.replace(/^вот что происходит в омске\.?\s*/i, "").trim())
+      .find(part => part.length > 20 && (!isDroneTopic || /беспилот|бпла|дрон|сирен|атак/i.test(part)));
+    const topic = isDroneTopic ? "беспилотная опасность атака БПЛА" : query;
+    return [city, topic, relevantHeadline, "последние новости Омск подробности -карта -мониторинг -Петербург"]
+      .filter(Boolean).join(" ");
   }
 
   if (isFollowUp(query) && previous) {
@@ -238,6 +246,19 @@ function isUsefulNewsTitle(title) {
   return !genericPatterns.some(pattern => pattern.test(value));
 }
 
+function isRelevantDetailedResult(item) {
+  const title = String(item?.title || "");
+  const snippet = String(item?.snippet || "");
+  const combined = (title + " " + snippet).toLowerCase().replace(/ё/g, "е");
+
+  // Detailed follow-ups must stay local to Omsk and the requested subject.
+  if (!/(омск|омской|омске|омич)/i.test(combined)) return false;
+  if (/(карта\s*бпла|мониторинг воздушной|воздушной обстановк|активных:\s*\d+|все регионы)/i.test(combined)) return false;
+  if (/(санкт-петербург|петербург|ленинградск)/i.test(combined) && !/(омск|омской|омске)/i.test(title)) return false;
+  if (!/(беспилот|бпла|дрон|сирен|пво|авиационн|ограничени.*связ|атак)/i.test(combined)) return false;
+  return true;
+}
+
 function usefulSnippetLead(value) {
   const text = String(value || "")
     .replace(/https?:\/\/\S+/gi, "")
@@ -270,7 +291,7 @@ function makeSearchAnswer(result, detailed = false) {
         .trim();
       const isFeed = /[·•]\s*(?:\d{1,2}:\d{2}|[«"А-ЯЁ])/u.test(snippet) ||
         /\b\d{1,2}:\d{2}\b/.test(snippet);
-      if (!isUsefulNewsTitle(title) || title.length < 18 || isFeed) continue;
+      if (!isRelevantDetailedResult(item) || !isUsefulNewsTitle(title) || title.length < 18 || isFeed) continue;
       const key = title.toLocaleLowerCase("ru").replace(/[«»"']/g, "");
       if (seen.has(key)) continue;
       seen.add(key);
