@@ -230,63 +230,59 @@ function makeSearchAnswer(result) {
     snippet: String(item.snippet || "").slice(0, 220)
   }))));
 
-  const items = raw
-    .map(item => {
-      const originalTitle = cleanNewsTitle(item.title);
-      const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
-      const title = isUsefulNewsTitle(originalTitle)
-        ? originalTitle
-        : usefulSnippetLead(snippet);
-      return { title, snippet };
-    })
-    .filter(item => item.title && isUsefulNewsTitle(item.title))
-    .filter(item => {
-      const key = item.title.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 4);
+  const headlines = [];
+  const addHeadline = value => {
+    let headline = String(value || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/^\s*\d{1,2}:\d{2}\s*/, "")
+      .replace(/\s+/g, " ")
+      .replace(/[.…]{2,}\s*$/g, "")
+      .replace(/[.!?;:,]+$/g, "")
+      .trim();
 
-  if (items.length) {
-    const parts = items.slice(0, 3).map(item => {
-      const description = item.snippet
-        .replace(/https?:\/\/\S+/gi, "")
-        .replace(/\s+/g, " ")
-        .trim();
+    // Search snippets from regional news homepages are often feeds:
+    // several unrelated headlines joined with " · ". Keep each one separate.
+    if (
+      headline.length < 18 ||
+      headline.length > 170 ||
+      /[.…]{2,}$/.test(String(value || "").trim()) ||
+      /\b(?:о|в|и|на|по|из|для|что|как|сообщил|сообщила)\s*$/i.test(headline) ||
+      /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline)
+    ) return;
 
-      // Search-result snippets from news portals often concatenate several
-      // unrelated headlines with middle dots and timestamps. Do not read that
-      // feed fragment as the description of a single story.
-      const looksLikeNewsFeed =
-        /[·•]\s*(?:\d{1,2}:\d{2}|[«"А-ЯЁ])/u.test(description) ||
-        /\b\d{1,2}:\d{2}\b/.test(description) ||
-        /(?:ещё событие|еще событие)/i.test(description);
+    const key = headline.toLocaleLowerCase("ru").replace(/[«»"']/g, "").trim();
+    if (seen.has(key)) return;
+    seen.add(key);
+    headlines.push(headline);
+  };
 
-      if (
-        !looksLikeNewsFeed &&
-        description.length >= 45 &&
-        description.length <= 180 &&
-        description.toLowerCase() !== item.title.toLowerCase() &&
-        !item.title.toLowerCase().includes(description.slice(0, 35).toLowerCase())
-      ) {
-        return item.title + ". " + description.slice(0, 150);
-      }
-      return item.title;
-    });
+  for (const item of raw) {
+    const title = cleanNewsTitle(item.title);
+    if (isUsefulNewsTitle(title)) addHeadline(title);
 
-    if (parts.length === 1) return fitAliceText("Вот что удалось найти. " + parts[0]);
-    return fitAliceText("Вот что происходит в Омске. " + parts.join(". Ещё событие: ") + ".");
+    const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
+    const fragments = snippet.split(/\s*[·•]\s*/).filter(Boolean);
+    for (const fragment of fragments) addHeadline(fragment);
+    if (fragments.length <= 1 && !isUsefulNewsTitle(title)) {
+      addHeadline(usefulSnippetLead(snippet));
+    }
+    if (headlines.length >= 5) break;
   }
 
-  const answer = cleanNewsTitle(result.answerBox || "");
-  if (answer.length > 35 && isUsefulNewsTitle(answer)) {
-    return fitAliceText(answer);
+  const answerBox = cleanNewsTitle(result.answerBox || "");
+  if (!headlines.length && answerBox.length > 25 && isUsefulNewsTitle(answerBox)) {
+    addHeadline(answerBox);
   }
 
-  return "Поиск нашёл страницы, но в них не удалось надёжно выделить заголовки событий. Попробуй спросить о конкретной теме или районе.";
-}
-async function askGemini(text, history, timeoutMs) {
+  if (headlines.length) {
+    const selected = headlines.slice(0, 4);
+    return fitAliceText(
+      "Вот что происходит в Омске. " + selected.join(". Ещё событие: ") + "."
+    );
+  }
+
+  return "Поиск пока не выделил отдельные новости. Попробуй спросить о конкретной теме или районе.";
+}async function askGemini(text, history, timeoutMs) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("MISSING_GEMINI_KEY");
   if (timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
