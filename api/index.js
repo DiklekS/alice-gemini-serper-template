@@ -1,4 +1,4 @@
-const DEEPSEEK_MODEL = "deepseek-flash";
+const GROQ_MODEL = "openai/gpt-oss-20b";
 
 const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_CHARS = 700;
@@ -6,7 +6,7 @@ const MAX_ALICE_TEXT = 1024;
 
 const TOTAL_RESPONSE_BUDGET_MS = 3900;
 const SERPER_TIMEOUT_MS = 2800;
-const DEEPSEEK_TIMEOUT_MS = 1900;
+const GROQ_TIMEOUT_MS = 1900;
 const RESPONSE_RESERVE_MS = 350;
 
 const SYSTEM_PROMPT = [
@@ -485,7 +485,7 @@ async function askCompatibleAI({ url, key, model, text, history, timeoutMs, stag
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model, messages, temperature: 0.3, max_tokens: 180, stream: false,
-      ...(stage === "DEEPSEEK" ? { thinking: { type: "disabled" } } : {})
+      
     })
   }, timeoutMs, stage);
 
@@ -502,36 +502,36 @@ async function askCompatibleAI({ url, key, model, text, history, timeoutMs, stag
 
 async function askAI(text, history, remainingMs) {
   const timeoutMs = Math.min(
-    DEEPSEEK_TIMEOUT_MS,
+    GROQ_TIMEOUT_MS,
     Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
   );
   const answer = await askCompatibleAI({
-    url: "https://api.deepseek.com/chat/completions",
-    key: process.env.DEEPSEEK_API_KEY,
-    model: String(process.env.DEEPSEEK_MODEL || DEEPSEEK_MODEL).trim(),
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    key: process.env.GROQ_API_KEY,
+    model: String(process.env.GROQ_MODEL || GROQ_MODEL).trim(),
     text,
     history,
     timeoutMs,
-    stage: "DEEPSEEK"
+    stage: "GROQ"
   });
-  console.info("Alice AI provider: DeepSeek");
+  console.info("Alice AI provider: Groq");
   return answer;
 }
 function errorForUser(error) {
   const code = error?.code || error?.message;
   switch (code) {
-    case "MISSING_DEEPSEEK_KEY": return "Не настроен основной ИИ. Добавьте DEEPSEEK_API_KEY в Vercel.";
+    case "MISSING_GROQ_KEY": return "Не настроен бесплатный ИИ. Добавьте GROQ_API_KEY в Vercel.";
     case "MISSING_SERPER_KEY": return "Поиск пока не настроен. Проверьте ключ Serper в Vercel.";
-    case "DEEPSEEK_KEY_REJECTED": return "DeepSeek отклонил API-ключ. Проверьте DEEPSEEK_API_KEY в Vercel.";
-    case "DEEPSEEK_QUOTA":
-    return "Превышен лимит запросов к ИИ. Попробуй позже.";
-    case "DEEPSEEK_TIMEOUT":
+    case "GROQ_KEY_REJECTED": return "Groq отклонил API-ключ. Проверьте GROQ_API_KEY в Vercel.";
+    case "GROQ_QUOTA":
+    return "Бесплатный лимит Groq исчерпан. Попробуй позже.";
+    case "GROQ_TIMEOUT":
     case "SERPER_TIMEOUT":
     case "TIME_BUDGET_EXHAUSTED": return "Сервис не успел ответить. Попробуй ещё раз.";
     case "SERPER_REQUEST_FAILED": return "Поиск временно недоступен. Попробуй немного позже.";
-    case "DEEPSEEK_EMPTY_RESPONSE":
-    return "Нейросеть не вернула ответ. Попробуй задать вопрос иначе.";
-    case "DEEPSEEK_REQUEST_FAILED":
+    case "GROQ_EMPTY_RESPONSE":
+    return "Groq не вернул ответ. Попробуй задать вопрос иначе.";
+    case "GROQ_REQUEST_FAILED":
     default: return "Не получилось обработать запрос. Попробуй ещё раз.";
   }
 }
@@ -540,7 +540,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     return res.status(200).json({
       ok: true,
-      service: "alice-deepseek-qwen-serper",
+      service: "alice-groq-serper",
       message: "Webhook is ready."
     });
   }
