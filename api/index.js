@@ -1,7 +1,7 @@
 const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
-const MAX_HISTORY_MESSAGES = 12;
-const MAX_HISTORY_MESSAGE_CHARS = 1200;
+const MAX_HISTORY_MESSAGES = 8;
+const MAX_HISTORY_MESSAGE_CHARS = 700;
 const MAX_ALICE_TEXT = 1024;
 
 const TOTAL_RESPONSE_BUDGET_MS = 3900;
@@ -591,7 +591,12 @@ export default async function handler(req, res) {
         GEMINI_TIMEOUT_MS,
         Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
       );
-      answer = await askGemini(text, oldHistory, geminiBudget);
+      // A new general question must not inherit a long, unrelated news-search thread.
+      // Keep a short conversational tail only when it is not stale search context.
+      const geminiHistory = previousQuestion && !followUp && !detailFollowUp
+        ? []
+        : oldHistory.slice(-6);
+      answer = await askGemini(text, geminiHistory, geminiBudget);
     }
 
     const history = [
