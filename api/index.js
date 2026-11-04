@@ -254,18 +254,29 @@ function makeSearchAnswer(result) {
         .replace(/https?:\/\/\S+/gi, "")
         .replace(/\s+/g, " ")
         .trim();
+
+      // Search-result snippets from news portals often concatenate several
+      // unrelated headlines with middle dots and timestamps. Do not read that
+      // feed fragment as the description of a single story.
+      const looksLikeNewsFeed =
+        /[·•]\s*(?:\d{1,2}:\d{2}|[«"А-ЯЁ])/u.test(description) ||
+        /\b\d{1,2}:\d{2}\b/.test(description) ||
+        /(?:ещё событие|еще событие)/i.test(description);
+
       if (
+        !looksLikeNewsFeed &&
         description.length >= 45 &&
+        description.length <= 180 &&
         description.toLowerCase() !== item.title.toLowerCase() &&
         !item.title.toLowerCase().includes(description.slice(0, 35).toLowerCase())
       ) {
-        return item.title + ". " + description.slice(0, 260);
+        return item.title + ". " + description.slice(0, 150);
       }
       return item.title;
     });
 
     if (parts.length === 1) return fitAliceText("Вот что удалось найти. " + parts[0]);
-    return fitAliceText("Вот конкретные новости. " + parts.join(". Ещё событие: ") + ".");
+    return fitAliceText("Вот что происходит в Омске. " + parts.join(". Ещё событие: ") + ".");
   }
 
   const answer = cleanNewsTitle(result.answerBox || "");
