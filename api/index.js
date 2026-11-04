@@ -502,7 +502,7 @@ async function askCompatibleAI({ url, key, model, text, history, timeoutMs, stag
 }
 
 async function askAI(text, history, remainingMs) {
-  const deepseekBudget = Math.min(1900, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS - 250));
+  const deepseekBudget = Math.min(DEEPSEEK_TIMEOUT_MS, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS - 250));
   let primaryError;
   try {
     const answer = await askCompatibleAI({
@@ -525,7 +525,7 @@ async function askAI(text, history, remainingMs) {
   if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".maas.aliyuncs.com")) {
     throw new Error("INVALID_QWEN_BASE_URL");
   }
-  const qwenBudget = Math.min(1450, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS));
+  const qwenBudget = Math.min(QWEN_TIMEOUT_MS, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS));
   try {
     const answer = await askCompatibleAI({
       url: baseUrl + "/chat/completions",
