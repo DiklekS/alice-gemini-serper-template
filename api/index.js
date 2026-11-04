@@ -336,7 +336,52 @@ function makeSearchAnswer(result, detailed = false) {
   if (detailed) {
     const details = [];
     for (const item of raw) {
-    // Require a verifiable recent date in the general city digest as well.
+      const title = cleanNewsTitle(item.title);
+      const snippet = String(item.snippet || "")
+        .replace(/https?:\/\/\S+/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const isFeed = /[·•]\s*(?:\d{1,2}:\d{2}|[«"А-ЯЁ])/u.test(snippet) ||
+        /\b\d{1,2}:\d{2}\b/.test(snippet);
+      if (!isRelevantDetailedResult(item) || !isUsefulNewsTitle(title) || title.length < 18 || isFeed) continue;
+      const key = title.toLocaleLowerCase("ru").replace(/[«»"']/g, "");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const description = snippet.length >= 45 && snippet.length <= 420 ? snippet : "";
+      details.push(description ? title + ". " + description : title);
+      if (details.length >= 3) break;
+    }
+
+    if (details.length) {
+      return fitAliceText("Вот что удалось найти подробнее. " + details.join(". "));
+    }
+  }
+
+  const headlines = [];
+  const addHeadline = value => {
+    const headline = String(value || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/^\s*\d{1,2}:\d{2}\s*/, "")
+      .replace(/\s+/g, " ")
+      .replace(/[.…]{2,}\s*$/g, "")
+      .replace(/[.!?;:,]+$/g, "")
+      .trim();
+
+    if (
+      headline.length < 18 ||
+      headline.length > 170 ||
+      /[.…]{2,}$/.test(String(value || "").trim()) ||
+      /\b(?:о|в|и|на|по|из|для|что|как|сообщил|сообщила)\s*$/i.test(headline) ||
+      /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline)
+    ) return;
+
+    const key = headline.toLocaleLowerCase("ru").replace(/[«»"']/g, "").trim();
+    if (seen.has(key)) return;
+    seen.add(key);
+    headlines.push(headline);
+  };
+
+  for (const item of raw) {
     if (!isRecentNewsItem(item)) continue;
     const rawTitle = String(item.title || "");
     if (/\.{2,}|…/.test(rawTitle)) continue;
@@ -348,9 +393,6 @@ function makeSearchAnswer(result, detailed = false) {
       title.length >= 22 &&
       !/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(titleLower);
 
-    // A concrete headline is already the event. Its snippet often contains
-    // a continuation or a syndicated copy of the same story, so don't read it
-    // as additional independent events.
     if (hasSpecificTitle) {
       addHeadline(title);
     } else {
@@ -373,7 +415,6 @@ function makeSearchAnswer(result, detailed = false) {
           if (fragment.length >= 28) fragments.push(fragment);
         }
       }
-
       for (const fragment of fragments) {
         const fragmentText = fragment.toLowerCase().replace(/ё/g, "е");
         if (!/(омск|омской|омске|омич|аэропорт|сирен|беспилот|бпла|дрон|хоценко)/i.test(fragmentText)) continue;
