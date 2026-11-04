@@ -120,7 +120,7 @@ function buildSearchQuery(text, history) {
       .map(part => part.replace(/^вот что происходит в омске\.?\s*/i, "").trim())
       .find(part => part.length > 20 && (!isDroneTopic || /беспилот|бпла|дрон|сирен|атак/i.test(part)));
     const topic = isDroneTopic ? "беспилотная опасность атака БПЛА" : query;
-    return [city, topic, relevantHeadline, "последние новости Омск подробности -карта -мониторинг -Петербург"]
+    return [city, topic, relevantHeadline, "последние новости Омск подробности после:2026-11-03 -карта -мониторинг -Петербург"]
       .filter(Boolean).join(" ");
   }
 
@@ -191,7 +191,8 @@ async function searchWeb(query, timeoutMs) {
     answerBox: String(data.answerBox?.answer || data.answerBox?.snippet || "").trim(),
     snippets: organic.slice(0, 8).map(item => ({
       title: String(item.title || "").trim(),
-      snippet: String(item.snippet || "").trim()
+      snippet: String(item.snippet || "").trim(),
+      date: String(item.date || item.datePublished || "").trim()
     })).filter(item => item.title || item.snippet)
   };
 }
@@ -250,6 +251,18 @@ function isRelevantDetailedResult(item) {
   const title = String(item?.title || "");
   const snippet = String(item?.snippet || "");
   const combined = (title + " " + snippet).toLowerCase().replace(/ё/g, "е");
+  const dateText = String(item?.date || "");
+  const dateSource = title + " " + snippet + " " + dateText;
+
+  // Never present explicitly old archive material as current news.
+  if (/\b(?:19|20)\d{2}\b/.test(dateSource)) {
+    const years = [...dateSource.matchAll(/\b((?:19|20)\d{2})\b/g)].map(match => Number(match[1]));
+    if (years.some(year => year < 2026)) return false;
+  }
+  if (dateText) {
+    const parsed = Date.parse(dateText);
+    if (Number.isFinite(parsed) && parsed < Date.now() - 7 * 24 * 60 * 60 * 1000) return false;
+  }
 
   // Detailed follow-ups must stay local to Omsk and the requested subject.
   if (!/(омск|омской|омске|омич)/i.test(combined)) return false;
