@@ -470,7 +470,7 @@ function makeSearchAnswer(result, detailed = false, todayOnly = false) {
 async function askCompatibleAI({ url, key, model, text, history, timeoutMs, stage }) {
   if (!key) throw new Error(`MISSING_${stage}_KEY`);
   if (!url || timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
-  if (!/^[A-Za-z0-9._-]+$/.test(model)) throw new Error("INVALID_MODEL_NAME");
+  if (!/^[A-Za-z0-9._/-]+$/.test(model)) throw new Error("INVALID_MODEL_NAME");
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
