@@ -74,6 +74,23 @@ function isFollowUp(text) {
   return /^(?:а\s*)?(?:именно+|подробнее|подробней|поподробнее|поподробней|подробности|какие именно|что именно|расскажи подробнее|расскажи поподробнее|а подробнее|можно подробнее|и что дальше|конкретнее|поясни|поясни подробнее|это как|почему|где именно|кто именно)[?!.,\s]*$/i.test(value);
 }
 
+function isNewsDetailFollowUp(text, history) {
+  const value = String(text || "").trim().toLowerCase().replace(/ё/g, "е");
+  const hasNewsContext = Boolean(lastSearchContext(history));
+  if (!hasNewsContext || value.length < 8) return false;
+  return /(?:расскажи|объясни|поясни|подробн|детал|что известно|что случилось|что произошло|последств|подробнее про|подробнее об|про беспилот|об атаке|о беспилот|по поводу)/i.test(value);
+}
+
+function lastAssistantSearchAnswer(history) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const item = history[i];
+    if (item.role === "model" && /вот что происходит|вот конкретные новости|вот что удалось найти/i.test(item.text)) {
+      return item.text;
+    }
+  }
+  return "";
+}
+
 function lastSearchContext(history) {
   for (let i = history.length - 1; i >= 0; i--) {
     const item = history[i];
@@ -90,11 +107,24 @@ function isSearchIntent(text) {
 
 function buildSearchQuery(text, history) {
   const previous = lastSearchContext(history);
-  if (isFollowUp(text) && previous) {
-    return previous + " последние конкретные события подробности";
+  const query = String(text || "").trim();
+
+  // If the user names a subject after hearing the news digest, search that
+  // subject directly instead of repeating the broad city-news query.
+  if (isNewsDetailFollowUp(query, history)) {
+    const city = /\bомск/i.test(previous) ? "Омск" : "";
+    return [query, city, "последние новости подробности"].filter(Boolean).join(" ");
   }
 
-  const query = String(text || "").trim();
+  if (isFollowUp(query) && previous) {
+    const lastAnswer = lastAssistantSearchAnswer(history);
+    const subject = lastAnswer
+      .replace(/^вот что происходит в омске\.?\s*/i, "")
+      .replace(/^вот конкретные новости\.?\s*/i, "")
+      .slice(0, 260);
+    return [previous, subject, "подробности новости"].filter(Boolean).join(" ");
+  }
+
   if (/что происходит|что случилось|что произошло/i.test(query)) {
     return query + " последние новости конкретные события сегодня";
   }
@@ -222,7 +252,91 @@ function usefulSnippetLead(value) {
   return candidate.slice(0, 190).replace(/[.!?;:,]+$/g, "").trim();
 }
 
-function makeSearchAnswer(result) {
+function makeSearchAnswer(result, detailed = false) {
+  const seen = new Set();
+  const raw = Array.isArray(result.snippets) ? result.snippets : [];
+  console.info("Serper organic results:", JSON.stringify(raw.slice(0, 6).map(item => ({
+    title: item.title,
+    snippet: String(item.snippet || "").slice(0, 220)
+  }))));
+
+  if (detailed) {
+    const details = [];
+    for (const item of raw) {
+      const title = cleanNewsTitle(item.title);
+      const snippet = String(item.snippet || "")
+        .replace(/https?:\/\/\S+/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const isFeed = /[·•]\s*(?:\d{1,2}:\d{2}|[«"А-ЯЁ])/u.test(snippet) ||
+        /\b\d{1,2}:\d{2}\b/.test(snippet);
+      if (!isUsefulNewsTitle(title) || title.length < 18 || isFeed) continue;
+      const key = title.toLocaleLowerCase("ru").replace(/[«»"']/g, "");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const description = snippet.length >= 45 && snippet.length <= 420
+        ? snippet
+        : "";
+      details.push(description ? title + ". " + description : title);
+      if (details.length >= 3) break;
+    }
+
+    if (details.length) {
+      return fitAliceText("Вот что удалось найти подробнее. " + details.join(". "));
+    }
+  }
+
+  const headlines = [];
+  const addHeadline = value => {
+    let headline = String(value || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/^\s*\d{1,2}:\d{2}\s*/, "")
+      .replace(/\s+/g, " ")
+      .replace(/[.…]{2,}\s*$/g, "")
+      .replace(/[.!?;:,]+$/g, "")
+      .trim();
+
+    if (
+      headline.length < 18 ||
+      headline.length > 170 ||
+      /[.…]{2,}$/.test(String(value || "").trim()) ||
+      /\b(?:о|в|и|на|по|из|для|что|как|сообщил|сообщила)\s*$/i.test(headline) ||
+      /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline)
+    ) return;
+
+    const key = headline.toLocaleLowerCase("ru").replace(/[«»"']/g, "").trim();
+    if (seen.has(key)) return;
+    seen.add(key);
+    headlines.push(headline);
+  };
+
+  for (const item of raw) {
+    const title = cleanNewsTitle(item.title);
+    if (isUsefulNewsTitle(title)) addHeadline(title);
+
+    const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
+    const fragments = snippet.split(/\s*[·•]\s*/).filter(Boolean);
+    for (const fragment of fragments) addHeadline(fragment);
+    if (fragments.length <= 1 && !isUsefulNewsTitle(title)) {
+      addHeadline(usefulSnippetLead(snippet));
+    }
+    if (headlines.length >= 5) break;
+  }
+
+  const answerBox = cleanNewsTitle(result.answerBox || "");
+  if (!headlines.length && answerBox.length > 25 && isUsefulNewsTitle(answerBox)) {
+    addHeadline(answerBox);
+  }
+
+  if (headlines.length) {
+    const selected = headlines.slice(0, 4);
+    return fitAliceText(
+      "Вот что происходит в Омске. " + selected.join(". Ещё событие: ") + "."
+    );
+  }
+
+  return "Поиск пока не выделил отдельные новости. Попробуй спросить о конкретной теме или районе.";
+}
   const seen = new Set();
   const raw = Array.isArray(result.snippets) ? result.snippets : [];
   console.info("Serper organic results:", JSON.stringify(raw.slice(0, 6).map(item => ({
@@ -386,9 +500,11 @@ export default async function handler(req, res) {
 
   try {
     const followUp = isFollowUp(text);
+    const detailFollowUp = isNewsDetailFollowUp(text, oldHistory);
     const previousQuestion = lastSearchContext(oldHistory);
     const shouldSearch = isSearchIntent(text) ||
-      (followUp && Boolean(previousQuestion));
+      (followUp && Boolean(previousQuestion)) ||
+      detailFollowUp;
 
     let answer;
     if (shouldSearch) {
@@ -401,7 +517,7 @@ export default async function handler(req, res) {
       const query = buildSearchQuery(text, oldHistory);
       console.log("Alice search query:", query);
       const result = await searchWeb(query, searchBudget);
-      answer = makeSearchAnswer(result);
+      answer = makeSearchAnswer(result, detailFollowUp);
     } else {
       const geminiBudget = Math.min(
         GEMINI_TIMEOUT_MS,
