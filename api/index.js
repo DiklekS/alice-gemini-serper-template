@@ -1,4 +1,4 @@
-const DEFAULT_MODEL = "gemini-3.5-flash-lite";
+const DEEPSEEK_MODEL = "deepseek-flash";
 
 const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_CHARS = 700;
@@ -6,7 +6,8 @@ const MAX_ALICE_TEXT = 1024;
 
 const TOTAL_RESPONSE_BUDGET_MS = 3900;
 const SERPER_TIMEOUT_MS = 2800;
-const GEMINI_TIMEOUT_MS = 3400;
+const DEEPSEEK_TIMEOUT_MS = 1900;
+const QWEN_TIMEOUT_MS = 1450;
 const RESPONSE_RESERVE_MS = 350;
 
 const SYSTEM_PROMPT = [
@@ -467,72 +468,102 @@ function makeSearchAnswer(result, detailed = false, todayOnly = false) {
   return "Поиск пока не выделил отдельные новости. Попробуй спросить о конкретной теме или районе.";
 }
 
-async function askGemini(text, history, timeoutMs) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("MISSING_GEMINI_KEY");
-  if (timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
-
-  const model = String(process.env.GEMINI_MODEL || DEFAULT_MODEL).trim();
+async function askCompatibleAI({ url, key, model, text, history, timeoutMs, stage }) {
+  if (!key) throw new Error(`MISSING_${stage}_KEY`);
+  if (!url || timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
   if (!/^[A-Za-z0-9._-]+$/.test(model)) throw new Error("INVALID_MODEL_NAME");
 
-  const contents = safeHistory(history).map(item => ({
-    role: item.role,
-    parts: [{ text: item.text }]
-  }));
-  contents.push({ role: "user", parts: [{ text }] });
-
-  const { response, data } = await fetchJson(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": key
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents,
-        generationConfig: { temperature: 0.3, maxOutputTokens: 140 }
-      })
-    },
-    timeoutMs,
-    "GEMINI"
-  );
+  const messages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...safeHistory(history).map(item => ({
+      role: item.role === "model" ? "assistant" : "user",
+      content: item.text
+    })),
+    { role: "user", content: text }
+  ];
+  const { response, data } = await fetchJson(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model, messages, temperature: 0.3, max_tokens: 180, stream: false,
+      ...(stage === "DEEPSEEK" ? { thinking: { type: "disabled" } } : {})
+    })
+  }, timeoutMs, stage);
 
   if (!response.ok) {
-    console.error("Gemini HTTP error:", response.status);
-    if (response.status === 401 || response.status === 403) throw new Error("GEMINI_KEY_REJECTED");
-    if (response.status === 429) throw new Error("GEMINI_QUOTA");
-    throw new Error("GEMINI_REQUEST_FAILED");
+    console.warn(`${stage} HTTP error:`, response.status);
+    if (response.status === 401 || response.status === 403) throw new Error(`${stage}_KEY_REJECTED`);
+    if (response.status === 429) throw new Error(`${stage}_QUOTA`);
+    throw new Error(`${stage}_REQUEST_FAILED`);
   }
-
-  const candidate = data?.candidates?.[0];
-  const answer = (candidate?.content?.parts || [])
-    .map(part => typeof part.text === "string" ? part.text : "")
-    .join("")
-    .trim();
-
-  if (!answer) {
-    if (data?.promptFeedback?.blockReason) throw new Error("GEMINI_BLOCKED");
-    throw new Error("GEMINI_EMPTY_RESPONSE");
-  }
+  const answer = String(data?.choices?.[0]?.message?.content || "").trim();
+  if (!answer) throw new Error(`${stage}_EMPTY_RESPONSE`);
   return answer;
 }
 
+async function askAI(text, history, remainingMs) {
+  const deepseekBudget = Math.min(1900, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS - 250));
+  let primaryError;
+  try {
+    const answer = await askCompatibleAI({
+      url: "https://api.deepseek.com/chat/completions",
+      key: process.env.DEEPSEEK_API_KEY,
+      model: String(process.env.DEEPSEEK_MODEL || "deepseek-flash").trim(),
+      text, history, timeoutMs: deepseekBudget, stage: "DEEPSEEK"
+    });
+    console.info("Alice AI provider: DeepSeek");
+    return answer;
+  } catch (error) {
+    primaryError = error;
+    console.warn("DeepSeek failed; trying Qwen fallback:", error?.code || error?.message || "UNKNOWN_ERROR");
+  }
+
+  const baseUrl = String(process.env.QWEN_BASE_URL || "").trim().replace(/\/+$/, "");
+  if (!baseUrl) throw new Error("MISSING_QWEN_BASE_URL");
+  let parsed;
+  try { parsed = new URL(baseUrl); } catch { throw new Error("INVALID_QWEN_BASE_URL"); }
+  if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".maas.aliyuncs.com")) {
+    throw new Error("INVALID_QWEN_BASE_URL");
+  }
+  const qwenBudget = Math.min(1450, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS));
+  try {
+    const answer = await askCompatibleAI({
+      url: baseUrl + "/chat/completions",
+      key: process.env.DASHSCOPE_API_KEY,
+      model: String(process.env.QWEN_MODEL || "qwen3.8-max").trim(),
+      text, history, timeoutMs: qwenBudget, stage: "QWEN"
+    });
+    console.info("Alice AI provider: Qwen fallback");
+    return answer;
+  } catch (fallbackError) {
+    console.error("Both AI providers failed:", {
+      deepseek: primaryError?.code || primaryError?.message,
+      qwen: fallbackError?.code || fallbackError?.message
+    });
+    throw fallbackError;
+  }
+}
 function errorForUser(error) {
   const code = error?.code || error?.message;
   switch (code) {
-    case "MISSING_GEMINI_KEY": return "Сервер не настроен. Проверьте ключ Gemini в Vercel.";
+    case "MISSING_DEEPSEEK_KEY": return "Не настроен основной ИИ. Добавьте DEEPSEEK_API_KEY в Vercel.";
     case "MISSING_SERPER_KEY": return "Поиск пока не настроен. Проверьте ключ Serper в Vercel.";
-    case "GEMINI_KEY_REJECTED": return "Не удалось подключиться к Gemini. Проверьте API-ключ.";
-    case "GEMINI_QUOTA": return "Превышен лимит запросов к Gemini. Попробуйте позже.";
+    case "DEEPSEEK_KEY_REJECTED": return "DeepSeek отклонил API-ключ. Проверьте DEEPSEEK_API_KEY в Vercel.";
+    case "QWEN_KEY_REJECTED": return "Резервная модель Qwen отклонила API-ключ. Проверьте DASHSCOPE_API_KEY в Vercel.";
+    case "DEEPSEEK_QUOTA":
+    case "QWEN_QUOTA": return "Превышен лимит запросов к ИИ. Попробуй позже.";
     case "GEMINI_TIMEOUT":
     case "SERPER_TIMEOUT":
     case "TIME_BUDGET_EXHAUSTED": return "Сервис не успел ответить. Попробуй ещё раз.";
     case "SERPER_REQUEST_FAILED": return "Поиск временно недоступен. Попробуй немного позже.";
-    case "GEMINI_BLOCKED": return "Я не смогла обработать этот запрос. Попробуй спросить иначе.";
-    case "GEMINI_EMPTY_RESPONSE": return "Нейросеть не вернула ответ. Попробуй задать вопрос иначе.";
-    case "GEMINI_REQUEST_FAILED": return "Не удалось связаться с нейросетью. Попробуй позже.";
+    case "DEEPSEEK_EMPTY_RESPONSE":
+    case "QWEN_EMPTY_RESPONSE": return "Нейросеть не вернула ответ. Попробуй задать вопрос иначе.";
+    case "DEEPSEEK_REQUEST_FAILED":
+    case "QWEN_REQUEST_FAILED":
+    case "QWEN_TIMEOUT": return "Не удалось получить ответ от нейросети. Попробуй позже.";
+    case "MISSING_QWEN_BASE_URL": return "Резервная модель пока не настроена. Добавьте QWEN_BASE_URL в Vercel.";
+    case "MISSING_QWEN_KEY": return "Резервная модель пока не настроена. Добавьте DASHSCOPE_API_KEY в Vercel.";
+    case "INVALID_QWEN_BASE_URL": return "Неверно настроен адрес резервной модели Qwen.";
     default: return "Не получилось обработать запрос. Попробуй ещё раз.";
   }
 }
@@ -541,7 +572,7 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     return res.status(200).json({
       ok: true,
-      service: "alice-gemini-serper",
+      service: "alice-deepseek-qwen-serper",
       message: "Webhook is ready."
     });
   }
@@ -598,16 +629,12 @@ export default async function handler(req, res) {
       const result = await searchWeb(query, searchBudget);
       answer = makeSearchAnswer(result, detailFollowUp, /сегодня|today/i.test(text));
     } else if (!answer) {
-      const geminiBudget = Math.min(
-        GEMINI_TIMEOUT_MS,
-        Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
-      );
       // A new general question must not inherit a long, unrelated news-search thread.
       // Keep a short conversational tail only when it is not stale search context.
-      const geminiHistory = previousQuestion && !followUp && !detailFollowUp
+      const aiHistory = previousQuestion && !followUp && !detailFollowUp
         ? []
         : oldHistory.slice(-6);
-      answer = await askGemini(text, geminiHistory, geminiBudget);
+      answer = await askAI(text, aiHistory, remainingMs);
     }
 
     const history = [
