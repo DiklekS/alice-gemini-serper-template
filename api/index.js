@@ -5,7 +5,6 @@ const MAX_HISTORY_MESSAGES = 8;
 const MAX_HISTORY_MESSAGE_CHARS = 1200;
 const MAX_ALICE_TEXT = 1024;
 
-// Оставляем запас до ограничения Яндекс Алисы.
 const TOTAL_RESPONSE_BUDGET_MS = 3900;
 const SERPER_TIMEOUT_MS = 2800;
 const GEMINI_TIMEOUT_MS = 3400;
@@ -98,7 +97,6 @@ async function fetchJson(url, options, timeoutMs, stage) {
     const data = await response.json().catch(() => ({}));
 
     return { response, data };
-
   } catch (error) {
     if (timedOut || error?.name === "AbortError") {
       const timeoutError = new Error(`${stage}_TIMEOUT`);
@@ -107,14 +105,11 @@ async function fetchJson(url, options, timeoutMs, stage) {
     }
 
     throw error;
-
   } finally {
     clearTimeout(timer);
   }
 }
 
-// Поиск сразу превращаем в голосовой ответ.
-// Второй запрос к Gemini для новостей не выполняется.
 async function searchWeb(query, timeoutMs) {
   const key = process.env.SERPER_API_KEY;
 
@@ -134,7 +129,7 @@ async function searchWeb(query, timeoutMs) {
         q: query,
         gl: "ru",
         hl: "ru",
-        num: 4
+        num: 6
       })
     },
     timeoutMs,
@@ -156,7 +151,7 @@ async function searchWeb(query, timeoutMs) {
     "";
 
   const snippets = organic
-    .slice(0, 3)
+    .slice(0, 6)
     .map(item => ({
       title: String(item.title || "").trim(),
       snippet: String(item.snippet || "").trim()
@@ -166,24 +161,92 @@ async function searchWeb(query, timeoutMs) {
   return { answerBox, snippets };
 }
 
+// Убираем технический и поисковый мусор из заголовков.
+function cleanNewsTitle(value) {
+  return String(value || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\bwww\.\S+/gi, "")
+    .replace(/\s*[|·–—-]\s*(Новости|Главные новости|Последние новости).*$/i, "")
+    .replace(/\s*[|·]\s*[^|·]{2,35}$/g, "")
+    .replace(/[\u0000-\u001F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\.{2,}/g, "")
+    .replace(/[|•]+/g, " ")
+    .trim()
+    .replace(/[.!?;:,]+$/g, "");
+}
+
+function isUsefulNewsTitle(title) {
+  if (!title || title.length < 18 || title.length > 220) {
+    return false;
+  }
+
+  const genericPatterns = [
+    /^новости\s/i,
+    /^главные новости/i,
+    /^последние новости/i,
+    /^новости сегодня/i,
+    /^смотреть онлайн/i,
+    /^фото и видео/i,
+    /^официальный сайт/i,
+    /^погода в/i,
+    /^карта сайта/i
+  ];
+
+  return !genericPatterns.some(pattern => pattern.test(title));
+}
+
 function makeSearchAnswer(result) {
   if (result.answerBox) {
-    return fitAliceText(result.answerBox);
+    const answer = cleanNewsTitle(result.answerBox);
+
+    if (answer.length > 15) {
+      return fitAliceText(answer);
+    }
   }
 
   if (!result.snippets.length) {
-    return "По этому запросу не удалось найти подходящие результаты. Попробуй сформулировать вопрос иначе.";
+    return "По этому запросу не удалось найти подходящие новости. Попробуй сформулировать вопрос иначе.";
   }
 
-  const parts = result.snippets
-    .slice(0, 2)
-    .map(item => {
-      const text = item.snippet || item.title;
-      return text.replace(/\s+/g, " ").trim();
-    });
+  const seen = new Set();
+
+  const news = result.snippets
+    .map(item => cleanNewsTitle(item.title))
+    .filter(isUsefulNewsTitle)
+    .filter(title => {
+      const key = title.toLowerCase();
+
+      if (seen.has(key)) return false;
+
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 3);
+
+  if (!news.length) {
+    return "Я нашла результаты поиска, но не смогла выделить из них подходящие новости. Попробуй задать вопрос немного иначе.";
+  }
+
+  if (news.length === 1) {
+    return fitAliceText(
+      "Вот что сейчас сообщают. " + news[0] + "."
+    );
+  }
+
+  if (news.length === 2) {
+    return fitAliceText(
+      "Вот несколько новостей. " +
+      news[0] + ". Также сообщается: " +
+      news[1] + "."
+    );
+  }
 
   return fitAliceText(
-    "Вот что удалось найти. " + parts.join(" ")
+    "Вот главные новости, которые удалось найти. " +
+    news[0] + ". Кроме того, " +
+    news[1] + ". Ещё одна новость: " +
+    news[2] + "."
   );
 }
 
@@ -361,8 +424,6 @@ export default async function handler(req, res) {
     let answer;
 
     if (isSearchIntent(text)) {
-      // Актуальные вопросы: только Serper.
-      // Не ждём дополнительный запрос к Gemini.
       const searchBudget = Math.min(
         SERPER_TIMEOUT_MS,
         Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
@@ -374,9 +435,7 @@ export default async function handler(req, res) {
 
       const result = await searchWeb(text, searchBudget);
       answer = makeSearchAnswer(result);
-
     } else {
-      // Обычные вопросы: Gemini.
       const geminiBudget = Math.min(
         GEMINI_TIMEOUT_MS,
         Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
@@ -404,7 +463,6 @@ export default async function handler(req, res) {
     return res.status(200).json(
       aliceResponse(answer, false, history)
     );
-
   } catch (error) {
     const code =
       error?.code ||
