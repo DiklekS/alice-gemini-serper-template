@@ -391,7 +391,9 @@ function makeSearchAnswer(result, detailed = false, todayOnly = false) {
       headline.length > 170 ||
       /[.…]{2,}$/.test(String(value || "").trim()) ||
       /\b(?:о|в|и|на|по|из|для|что|как|сообщил|сообщила)\s*$/i.test(headline) ||
-      /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline)
+      /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline) ||
+      /^(?:омска?\s+и\s+омской области|омск\s*[-—:]\s*последние новости|последние новости омска)(?:\s+сегодня)?$/i.test(headline) ||
+      /^(?:новости омска и омской области|омск\s*[-—:]?\s*последние новости сегодня)$/i.test(headline)
     ) return;
 
     const key = headline.toLocaleLowerCase("ru").replace(/[«»"']/g, "").trim();
