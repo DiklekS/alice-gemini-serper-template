@@ -7,7 +7,6 @@ const MAX_ALICE_TEXT = 1024;
 const TOTAL_RESPONSE_BUDGET_MS = 3900;
 const SERPER_TIMEOUT_MS = 2800;
 const DEEPSEEK_TIMEOUT_MS = 1900;
-const QWEN_TIMEOUT_MS = 1450;
 const RESPONSE_RESERVE_MS = 350;
 
 const SYSTEM_PROMPT = [
@@ -502,46 +501,21 @@ async function askCompatibleAI({ url, key, model, text, history, timeoutMs, stag
 }
 
 async function askAI(text, history, remainingMs) {
-  const deepseekBudget = Math.min(DEEPSEEK_TIMEOUT_MS, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS - 250));
-  let primaryError;
-  try {
-    const answer = await askCompatibleAI({
-      url: "https://api.deepseek.com/chat/completions",
-      key: process.env.DEEPSEEK_API_KEY,
-      model: String(process.env.DEEPSEEK_MODEL || "deepseek-flash").trim(),
-      text, history, timeoutMs: deepseekBudget, stage: "DEEPSEEK"
-    });
-    console.info("Alice AI provider: DeepSeek");
-    return answer;
-  } catch (error) {
-    primaryError = error;
-    console.warn("DeepSeek failed; trying Qwen fallback:", error?.code || error?.message || "UNKNOWN_ERROR");
-  }
-
-  const baseUrl = String(process.env.QWEN_BASE_URL || "").trim().replace(/\/+$/, "");
-  if (!baseUrl) throw new Error("MISSING_QWEN_BASE_URL");
-  let parsed;
-  try { parsed = new URL(baseUrl); } catch { throw new Error("INVALID_QWEN_BASE_URL"); }
-  if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".maas.aliyuncs.com")) {
-    throw new Error("INVALID_QWEN_BASE_URL");
-  }
-  const qwenBudget = Math.min(QWEN_TIMEOUT_MS, Math.max(0, remainingMs() - RESPONSE_RESERVE_MS));
-  try {
-    const answer = await askCompatibleAI({
-      url: baseUrl + "/chat/completions",
-      key: process.env.DASHSCOPE_API_KEY,
-      model: String(process.env.QWEN_MODEL || "qwen3.8-max").trim(),
-      text, history, timeoutMs: qwenBudget, stage: "QWEN"
-    });
-    console.info("Alice AI provider: Qwen fallback");
-    return answer;
-  } catch (fallbackError) {
-    console.error("Both AI providers failed:", {
-      deepseek: primaryError?.code || primaryError?.message,
-      qwen: fallbackError?.code || fallbackError?.message
-    });
-    throw fallbackError;
-  }
+  const timeoutMs = Math.min(
+    DEEPSEEK_TIMEOUT_MS,
+    Math.max(0, remainingMs() - RESPONSE_RESERVE_MS)
+  );
+  const answer = await askCompatibleAI({
+    url: "https://api.deepseek.com/chat/completions",
+    key: process.env.DEEPSEEK_API_KEY,
+    model: String(process.env.DEEPSEEK_MODEL || DEEPSEEK_MODEL).trim(),
+    text,
+    history,
+    timeoutMs,
+    stage: "DEEPSEEK"
+  });
+  console.info("Alice AI provider: DeepSeek");
+  return answer;
 }
 function errorForUser(error) {
   const code = error?.code || error?.message;
@@ -549,21 +523,15 @@ function errorForUser(error) {
     case "MISSING_DEEPSEEK_KEY": return "Не настроен основной ИИ. Добавьте DEEPSEEK_API_KEY в Vercel.";
     case "MISSING_SERPER_KEY": return "Поиск пока не настроен. Проверьте ключ Serper в Vercel.";
     case "DEEPSEEK_KEY_REJECTED": return "DeepSeek отклонил API-ключ. Проверьте DEEPSEEK_API_KEY в Vercel.";
-    case "QWEN_KEY_REJECTED": return "Резервная модель Qwen отклонила API-ключ. Проверьте DASHSCOPE_API_KEY в Vercel.";
     case "DEEPSEEK_QUOTA":
-    case "QWEN_QUOTA": return "Превышен лимит запросов к ИИ. Попробуй позже.";
-    case "GEMINI_TIMEOUT":
+    return "Превышен лимит запросов к ИИ. Попробуй позже.";
+    case "DEEPSEEK_TIMEOUT":
     case "SERPER_TIMEOUT":
     case "TIME_BUDGET_EXHAUSTED": return "Сервис не успел ответить. Попробуй ещё раз.";
     case "SERPER_REQUEST_FAILED": return "Поиск временно недоступен. Попробуй немного позже.";
     case "DEEPSEEK_EMPTY_RESPONSE":
-    case "QWEN_EMPTY_RESPONSE": return "Нейросеть не вернула ответ. Попробуй задать вопрос иначе.";
+    return "Нейросеть не вернула ответ. Попробуй задать вопрос иначе.";
     case "DEEPSEEK_REQUEST_FAILED":
-    case "QWEN_REQUEST_FAILED":
-    case "QWEN_TIMEOUT": return "Не удалось получить ответ от нейросети. Попробуй позже.";
-    case "MISSING_QWEN_BASE_URL": return "Резервная модель пока не настроена. Добавьте QWEN_BASE_URL в Vercel.";
-    case "MISSING_QWEN_KEY": return "Резервная модель пока не настроена. Добавьте DASHSCOPE_API_KEY в Vercel.";
-    case "INVALID_QWEN_BASE_URL": return "Неверно настроен адрес резервной модели Qwen.";
     default: return "Не получилось обработать запрос. Попробуй ещё раз.";
   }
 }
