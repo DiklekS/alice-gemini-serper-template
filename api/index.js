@@ -247,27 +247,61 @@ function isUsefulNewsTitle(title) {
   return !genericPatterns.some(pattern => pattern.test(value));
 }
 
+function isRecentNewsItem(item) {
+  const source = [
+    String(item?.date || ""),
+    String(item?.title || ""),
+    String(item?.snippet || "")
+  ].join(" ").toLowerCase().replace(/ё/g, "е");
+  const now = new Date();
+  let published = null;
+
+  const relative = source.match(/\\b(\\d+)\\s*(час|часа|часов|минут|минута|минуты|дн|день|дня|дней)\\s*назад\\b|\\b(вчера|сегодня)\\b/);
+  if (relative) {
+    if (relative[2]) {
+      const amount = Number(relative[1]);
+      const unit = relative[2];
+      published = new Date(now.getTime() - amount * (/час/.test(unit) ? 3600000 : /минут/.test(unit) ? 60000 : 86400000));
+    } else {
+      published = new Date(now);
+      if (relative[3] === "вчера") published.setDate(published.getDate() - 1);
+    }
+  }
+
+  if (!published) {
+    const monthNames = {
+      "января": 0, "февраля": 1, "марта": 2, "апреля": 3,
+      "мая": 4, "июня": 5, "июля": 6, "августа": 7,
+      "сентября": 8, "октября": 9, "ноября": 10, "декабря": 11
+    };
+    const dated = source.match(/\\b(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\\s+(20\\d{2}))?\\b/);
+    if (dated) {
+      const year = dated[3] ? Number(dated[3]) : now.getFullYear();
+      published = new Date(year, monthNames[dated[2]], Number(dated[1]), 12, 0, 0);
+    }
+  }
+
+  if (!published) {
+    const parsed = Date.parse(String(item?.date || ""));
+    if (Number.isFinite(parsed)) published = new Date(parsed);
+  }
+
+  // If the search provider supplies no verifiable publication date, do not
+  // present the result as a current event in a voice news follow-up.
+  if (!published || Number.isNaN(published.getTime())) return false;
+  const ageMs = now.getTime() - published.getTime();
+  return ageMs >= -86400000 && ageMs <= 7 * 86400000;
+}
+
 function isRelevantDetailedResult(item) {
   const title = String(item?.title || "");
   const snippet = String(item?.snippet || "");
   const combined = (title + " " + snippet).toLowerCase().replace(/ё/g, "е");
-  const dateText = String(item?.date || "");
-  const dateSource = title + " " + snippet + " " + dateText;
 
-  // Never present explicitly old archive material as current news.
-  if (/\b(?:19|20)\d{2}\b/.test(dateSource)) {
-    const years = [...dateSource.matchAll(/\b((?:19|20)\d{2})\b/g)].map(match => Number(match[1]));
-    if (years.some(year => year < 2026)) return false;
-  }
-  if (dateText) {
-    const parsed = Date.parse(dateText);
-    if (Number.isFinite(parsed) && parsed < Date.now() - 7 * 24 * 60 * 60 * 1000) return false;
-  }
-
-  // Detailed follow-ups must stay local to Omsk and the requested subject.
+  if (!isRecentNewsItem(item)) return false;
   if (!/(омск|омской|омске|омич)/i.test(combined)) return false;
-  if (/(карта\s*бпла|мониторинг воздушной|воздушной обстановк|активных:\s*\d+|все регионы)/i.test(combined)) return false;
-  if (/(санкт-петербург|петербург|ленинградск)/i.test(combined) && !/(омск|омской|омске)/i.test(title)) return false;
+  if (/(карта\\s*бпла|мониторинг воздушной|воздушной обстановк|активных:\\s*\\d+|все регионы)/i.test(combined)) return false;
+  if (/(санкт-петербург|петербург|ленинградск)/i.test(combined)) return false;
   if (!/(беспилот|бпла|дрон|сирен|пво|авиационн|ограничени.*связ|атак)/i.test(combined)) return false;
   return true;
 }
