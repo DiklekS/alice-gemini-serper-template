@@ -256,7 +256,7 @@ function isRecentNewsItem(item) {
   const now = new Date();
   let published = null;
 
-  const relative = source.match(/\b(\d+)\s*(часов|часа|час|минут|минута|минуты|дней|дня|день|дн)\s*назад\b|\b(вчера|сегодня)\b|\b(\d+)\s*(hours?|minutes?|days?)\s+ago\b|\b(today|yesterday)\b/);
+  const relative = source.match(/(\d+)\s*(часов|часа|час|минут|минута|минуты|дней|дня|день|дн)\s*назад|(вчера|сегодня)|\b(\d+)\s*(hours?|minutes?|days?)\s+ago\b|\b(today|yesterday)\b/i);
   if (relative) {
     if (relative[2]) {
       const amount = Number(relative[1]);
@@ -278,7 +278,7 @@ function isRecentNewsItem(item) {
       "мая": 4, "июня": 5, "июля": 6, "августа": 7,
       "сентября": 8, "октября": 9, "ноября": 10, "декабря": 11
     };
-    const dated = source.match(/\b(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(20\d{2}))?\b/);
+    const dated = source.match(/(?:^|\s)(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(20\d{2}))?(?=\s|$)/i);
     if (dated) {
       const year = dated[3] ? Number(dated[3]) : now.getFullYear();
       published = new Date(year, monthNames[dated[2]], Number(dated[1]), 12, 0, 0);
