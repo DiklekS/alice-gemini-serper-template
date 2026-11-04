@@ -305,7 +305,9 @@ function isRelevantDetailedResult(item) {
   const combined = (title + " " + snippet).toLowerCase().replace(/ё/g, "е");
 
   if (!isRecentNewsItem(item)) return false;
-  if (!/(омск|омской|омске|омич)/i.test(combined)) return false;
+  // The headline itself must identify Omsk; a snippet mentioning Omsk is not enough.
+  if (!/(омск|омской|омске|омич|хоценко)/i.test(title)) return false;
+  if (/(соседн.*регион|тюменск|новосибирск|курганск)/i.test(title)) return false;
   if (/(карта\s*бпла|мониторинг воздушной|воздушной обстановк|активных:\s*\d+|все регионы)/i.test(combined)) return false;
   if (/(санкт-петербург|петербург|ленинградск)/i.test(combined)) return false;
   if (!/(беспилот|бпла|дрон|сирен|пво|авиационн|ограничени.*связ|атак)/i.test(combined)) return false;
@@ -389,6 +391,7 @@ function makeSearchAnswer(result, detailed = false, todayOnly = false) {
       (todayOnly && mentionsOlderCalendarDate(headline)) ||
       headline.length < 18 ||
       headline.length > 170 ||
+      !isUsefulNewsTitle(headline) ||
       /[.…]{2,}$/.test(String(value || "").trim()) ||
       /\b(?:о|в|и|на|по|из|для|что|как|сообщил|сообщила)\s*$/i.test(headline) ||
       /^(?:что произошло|главные новости|последние новости|новости омска)/i.test(headline) ||
@@ -489,7 +492,7 @@ async function askGemini(text, history, timeoutMs) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents,
-        generationConfig: { temperature: 0.5, maxOutputTokens: 220 }
+        generationConfig: { temperature: 0.3, maxOutputTokens: 140 }
       })
     },
     timeoutMs,
