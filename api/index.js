@@ -407,7 +407,10 @@ function makeSearchAnswer(result, detailed = false, todayOnly = false) {
     const title = cleanNewsTitle(rawTitle);
     const titleLower = title.toLowerCase().replace(/ё/g, "е");
     const isPortalTitle = /^(?:омск\s*[-—:]?\s*)?(?:главные|последние)?\s*новости\b|^(?:чп\s*омск|омск-информ|бк\s*55|бк55|аив|аиф)\b/i.test(title);
+    const itemText = (title + " " + String(item.snippet || "")).toLowerCase().replace(/ё/g, "е");
+    const isClearlyOmskRelated = /(омск|омской|омске|омич|хоценко|иртыш)/i.test(itemText);
     const hasSpecificTitle = !isPortalTitle &&
+      isClearlyOmskRelated &&
       isUsefulNewsTitle(title) &&
       title.length >= 22 &&
       !/(пермск|пермь|екатеринбург|казан|петербург|ленинградск)/i.test(titleLower);
