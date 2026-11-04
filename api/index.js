@@ -182,7 +182,8 @@ function cleanNewsTitle(value) {
 }
 
 function isUsefulNewsTitle(title) {
-  if (!title || title.length < 18 || title.length > 220) return false;
+  const value = String(title || "").trim();
+  if (value.length < 8 || value.length > 220) return false;
 
   const genericPatterns = [
     /^новости\b/i,
@@ -199,20 +200,46 @@ function isUsefulNewsTitle(title) {
     /^новости омска и/i,
     /^главные события омска/i,
     /^омск\.?$/i,
-    /^читайте последние новости/i
+    /^читайте последние новости/i,
+    /^последние новости омска/i,
+    /^новости омска сегодня/i
   ];
 
-  return !genericPatterns.some(pattern => pattern.test(title));
+  return !genericPatterns.some(pattern => pattern.test(value));
+}
+
+function usefulSnippetLead(value) {
+  const text = String(value || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:омск-информ|бк\s*55|город\s*55|риа новости)\s*[:—-]\s*/i, "")
+    .trim();
+  if (text.length < 35) return "";
+
+  const firstSentence = text.split(/(?<=[.!?])\s+/)[0].trim();
+  const candidate = firstSentence.length >= 35 ? firstSentence : text.slice(0, 180).trim();
+  if (/^(?:читайте|подписывайтесь|смотрите|главные новости|последние новости|новости омска)/i.test(candidate)) return "";
+  return candidate.slice(0, 190).replace(/[.!?;:,]+$/g, "").trim();
 }
 
 function makeSearchAnswer(result) {
   const seen = new Set();
-  const items = (result.snippets || [])
-    .map(item => ({
-      title: cleanNewsTitle(item.title),
-      snippet: String(item.snippet || "").replace(/\s+/g, " ").trim()
-    }))
-    .filter(item => isUsefulNewsTitle(item.title))
+  const raw = Array.isArray(result.snippets) ? result.snippets : [];
+  console.info("Serper organic results:", JSON.stringify(raw.slice(0, 6).map(item => ({
+    title: item.title,
+    snippet: String(item.snippet || "").slice(0, 220)
+  }))));
+
+  const items = raw
+    .map(item => {
+      const originalTitle = cleanNewsTitle(item.title);
+      const snippet = String(item.snippet || "").replace(/\s+/g, " ").trim();
+      const title = isUsefulNewsTitle(originalTitle)
+        ? originalTitle
+        : usefulSnippetLead(snippet);
+      return { title, snippet };
+    })
+    .filter(item => item.title && isUsefulNewsTitle(item.title))
     .filter(item => {
       const key = item.title.toLowerCase();
       if (seen.has(key)) return false;
@@ -227,9 +254,12 @@ function makeSearchAnswer(result) {
         .replace(/https?:\/\/\S+/gi, "")
         .replace(/\s+/g, " ")
         .trim();
-      // Заголовок сообщает, о каком событии речь; сниппет добавляет конкретику.
-      if (description.length >= 35 && description.toLowerCase() !== item.title.toLowerCase()) {
-        return item.title + ". " + description;
+      if (
+        description.length >= 45 &&
+        description.toLowerCase() !== item.title.toLowerCase() &&
+        !item.title.toLowerCase().includes(description.slice(0, 35).toLowerCase())
+      ) {
+        return item.title + ". " + description.slice(0, 260);
       }
       return item.title;
     });
@@ -239,13 +269,12 @@ function makeSearchAnswer(result) {
   }
 
   const answer = cleanNewsTitle(result.answerBox || "");
-  if (answer.length > 35 && !/^(новости|главные новости|последние новости)/i.test(answer)) {
+  if (answer.length > 35 && isUsefulNewsTitle(answer)) {
     return fitAliceText(answer);
   }
 
-  return "В поиске пока не удалось выделить конкретные события. Попробуй спросить о конкретной теме или районе.";
+  return "Поиск нашёл страницы, но в них не удалось надёжно выделить заголовки событий. Попробуй спросить о конкретной теме или районе.";
 }
-
 async function askGemini(text, history, timeoutMs) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("MISSING_GEMINI_KEY");
