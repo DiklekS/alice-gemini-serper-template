@@ -1,6 +1,6 @@
 const DEFAULT_MODEL = "gemini-3.5-flash-lite";
 
-const MAX_HISTORY_MESSAGES = 8;
+const MAX_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_MESSAGE_CHARS = 1200;
 const MAX_ALICE_TEXT = 1024;
 
@@ -70,11 +70,18 @@ function lastUserMessage(history) {
 }
 
 function isFollowUp(text) {
-  return /^(а\s*)?(именно|подробнее|поподробнее|какие именно|что именно|расскажи подробнее|и что дальше|а具体|конкретнее|поясни|это как|почему|где именно|кто именно)[?!.,\s]*$/i.test(
-    String(text || "").trim()
-  ) || /^(а именно|подробнее|поподробнее|какие именно|что именно|конкретнее|поясни подробнее)[?!.,\s]*$/i.test(
-    String(text || "").trim()
-  );
+  const value = String(text || "").trim().toLowerCase().replace(/ё/g, "е");
+  return /^(?:а\\s*)?(?:именно+|подробнее|подробней|поподробнее|поподробней|подробности|какие именно|что именно|расскажи подробнее|расскажи поподробнее|а подробнее|можно подробнее|и что дальше|конкретнее|поясни|поясни подробнее|это как|почему|где именно|кто именно)[?!.,\\s]*$/i.test(value);
+}
+
+function lastSearchContext(history) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const item = history[i];
+    if (item.role === "user" && !isFollowUp(item.text) && isSearchIntent(item.text)) {
+      return item.text;
+    }
+  }
+  return "";
 }
 
 function isSearchIntent(text) {
@@ -82,9 +89,9 @@ function isSearchIntent(text) {
 }
 
 function buildSearchQuery(text, history) {
-  const previous = lastUserMessage(history);
+  const previous = lastSearchContext(history);
   if (isFollowUp(text) && previous) {
-    return previous + " конкретные события подробности что произошло";
+    return previous + " последние конкретные события подробности";
   }
 
   const query = String(text || "").trim();
@@ -152,23 +159,33 @@ async function searchWeb(query, timeoutMs) {
 }
 
 function cleanNewsTitle(value) {
-  return String(value || "")
-    .replace(/https?:\/\/\S+/gi, "")
-    .replace(/\bwww\.\S+/gi, "")
-    .replace(/\s*[|·–—]\s*[^|·]{2,55}$/g, "")
-    .replace(/[\u0000-\u001F]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\.{2,}/g, "")
+  let title = String(value || "")
+    .replace(/https?:\\/\\/\\S+/gi, "")
+    .replace(/\\bwww\\.\\S+/gi, "")
+    .replace(/[\\u0000-\\u001F]/g, " ")
+    .replace(/\\s+/g, " ")
+    .replace(/\\.{2,}/g, "")
     .replace(/[|•]+/g, " ")
-    .trim()
-    .replace(/[.!?;:,]+$/g, "");
+    .trim();
+
+  title = title.replace(/^(?:омск-информ|бк\\s*55|город\\s*55|inci\\s*55|инцидент омск|риа новости)\\s*[:—-]\\s*/i, "");
+  title = title.replace(/^(?:последние новости|главные новости|новости)\\s+(?:омска|омск[а-яё]*)(?:\\s+и\\s+омской областью?)?[^.!?]{0,90}[.!?]\\s*/i, "");
+  title = title.replace(/^(?:омск\\s*[-—:]\\s*)?(?:последние новости сегодня|новости омска и омской области|новости омска и области)[.!?\\s—:-]*/i, "");
+
+  const pieces = title.split(/\\s+[·|]\\s+|\\s+—\\s+/).map(part => part.trim()).filter(Boolean);
+  if (pieces.length > 1) {
+    const meaningful = pieces.find(part => isUsefulNewsTitle(part));
+    if (meaningful) title = meaningful;
+  }
+
+  return title.replace(/[.!?;:,]+$/g, "").trim();
 }
 
 function isUsefulNewsTitle(title) {
   if (!title || title.length < 18 || title.length > 220) return false;
 
   const genericPatterns = [
-    /^новости\s/i,
+    /^новости\\b/i,
     /^главные новости/i,
     /^последние новости/i,
     /^новости сегодня/i,
@@ -177,10 +194,12 @@ function isUsefulNewsTitle(title) {
     /^официальный сайт/i,
     /^погода в/i,
     /^карта сайта/i,
-    /^инцидент\s*\d*$/i,
-    /^омск-информ$/i,
+    /^инцидент\\s*\\d*$/i,
+    /^(?:омск-информ|бк\\s*55|город\\s*55|inci\\s*55|инцидент омск)\\b/i,
     /^новости омска и/i,
-    /^главные события омска/i
+    /^главные события омска/i,
+    /^омск\\.?$/i,
+    /^читайте последние новости/i
   ];
 
   return !genericPatterns.some(pattern => pattern.test(title));
@@ -331,9 +350,9 @@ export default async function handler(req, res) {
 
   try {
     const followUp = isFollowUp(text);
-    const previousQuestion = lastUserMessage(oldHistory);
+    const previousQuestion = lastSearchContext(oldHistory);
     const shouldSearch = isSearchIntent(text) ||
-      (followUp && previousQuestion && isSearchIntent(previousQuestion));
+      (followUp && Boolean(previousQuestion));
 
     let answer;
     if (shouldSearch) {
@@ -381,5 +400,6 @@ export {
   safeHistory,
   makeSearchAnswer,
   isFollowUp,
-  buildSearchQuery
+  buildSearchQuery,
+  lastSearchContext
 };
